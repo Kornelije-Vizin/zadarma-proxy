@@ -15,12 +15,14 @@ export async function handler(event) {
       return { statusCode: 200, body: "OK" };
     }
 
-    const target = process.env.LATENODE_WEBHOOK_URL;
+    const target = (process.env.LATENODE_WEBHOOK_URL || "").trim();
     if (!target) {
       return { statusCode: 500, body: "Missing LATENODE_WEBHOOK_URL" };
     }
 
-    const DEBUG = String(process.env.DEBUG || "").toLowerCase() === "true" || process.env.DEBUG === "1";
+    const DEBUG =
+      String(process.env.DEBUG || "").toLowerCase() === "true" ||
+      process.env.DEBUG === "1";
 
     const contentTypeRaw =
       event.headers?.["content-type"] ||
@@ -53,12 +55,10 @@ export async function handler(event) {
       get("notification") ||
       get("call_event") ||
       get("pbx_event") ||
-      get("status") || // sometimes "status" carries a subtype
+      get("status") ||
       "";
 
     // 4) Allow-list filtering to reduce spam
-    // Set ALLOW_EVENTS in Netlify env like: notify_start,notify_end,notify_answer
-    // If not set, default allow-list keeps only the basics.
     const allowEnv = (process.env.ALLOW_EVENTS || "").trim();
     const allowList = (allowEnv
       ? allowEnv.split(",").map((s) => s.trim()).filter(Boolean)
@@ -68,8 +68,7 @@ export async function handler(event) {
     const normalizedEventType = String(eventType || "").toLowerCase();
 
     // If we can't detect type, we still forward during debug; otherwise drop unknowns.
-    const shouldForward =
-      !normalizedEventType ? DEBUG : allowList.includes(normalizedEventType);
+    const shouldForward = !normalizedEventType ? DEBUG : allowList.includes(normalizedEventType);
 
     if (DEBUG) {
       console.log("=== ZADARMA WEBHOOK HIT ===");
@@ -79,7 +78,6 @@ export async function handler(event) {
       console.log("FORWARD?:", shouldForward);
       console.log("BODY_RAW:", rawBody);
       console.log("BODY_PARSED:", parsed);
-      console.log("FORWARD_TO:", target ? "SET" : "MISSING");
     }
 
     if (!shouldForward) {
@@ -87,9 +85,7 @@ export async function handler(event) {
       return { statusCode: 200, body: "IGNORED" };
     }
 
-    // 5) Forward to Latenode
-    // Force JSON payload to make Latenode handling easier:
-    // We wrap original content + parsed + headers.
+    // 5) Forward to Latenode (force JSON)
     const forwardPayload = {
       source: "zadarma",
       receivedAt: new Date().toISOString(),
@@ -104,7 +100,13 @@ export async function handler(event) {
       query: event.queryStringParameters || {},
     };
 
-    const resp = await fetch(target, {
+    // Ensure fetch exists (Netlify Node 18/20 has it, but this is a safe fallback)
+    const doFetch = typeof fetch === "function" ? fetch : null;
+    if (!doFetch) {
+      return { statusCode: 500, body: "fetch() not available in this runtime. Set Node to 18/20." };
+    }
+
+    const resp = await doFetch(target, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -113,10 +115,32 @@ export async function handler(event) {
       body: JSON.stringify(forwardPayload),
     });
 
+    const latenodeBodyText = await resp.text().catch(() => "");
+
     if (DEBUG) {
-      console.log("LATENODE_STATUS:", resp.status);
+      // Return diagnostics to the caller so you can see it in PowerShell immediately
+      const maskedTarget = target.length > 40 ? target.slice(0, 35) + "..." : target;
+
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          {
+            ok: true,
+            forwardedTo: maskedTarget,
+            latenodeStatus: resp.status,
+            latenodeBodyPreview: String(latenodeBodyText || "").slice(0, 300),
+            detectedEventType: eventType || null,
+            normalizedEventType: normalizedEventType || null,
+            shouldForward,
+          },
+          null,
+          2
+        ),
+      };
     }
 
+    // Normal mode
     return { statusCode: 200, body: "OK" };
   } catch (e) {
     console.log("ERROR:", String(e));
