@@ -20,10 +20,8 @@ export async function handler(event) {
       return { statusCode: 500, body: "Missing LATENODE_SMS_WEBHOOK_URL" };
     }
 
-    const DEBUG =
-      String(process.env.DEBUG || "").toLowerCase() === "true" ||
-      process.env.DEBUG === "1";
-
+    const DEBUG = (process.env.NODE_ENV || "").toLowerCase() !== "production";
+    
     const contentTypeRaw =
       event.headers?.["content-type"] ||
       event.headers?.["Content-Type"] ||
