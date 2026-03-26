@@ -67,8 +67,8 @@ export async function handler(event) {
 
     const normalizedEventType = String(eventType || "").toLowerCase();
 
-    // If we can't detect type, we still forward during debug; otherwise drop unknowns.
-    const shouldForward = !normalizedEventType ? DEBUG : allowList.includes(normalizedEventType);
+    // TEMP DEBUG: prosledi sve evente bez filtera
+     const shouldForward = true;
 
     if (DEBUG) {
       console.log("=== ZADARMA WEBHOOK HIT ===");
