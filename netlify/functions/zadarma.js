@@ -68,16 +68,30 @@ export async function handler(event) {
     const normalizedEventType = String(eventType || "").toLowerCase();
 
     // TEMP DEBUG: prosledi sve evente bez filtera
-     const shouldForward = true;
+    const shouldForward = true;
 
-    if (DEBUG) {
-      console.log("=== ZADARMA WEBHOOK HIT ===");
-      console.log("CT:", contentTypeRaw);
-      console.log("EVENT_TYPE_RAW:", eventType);
-      console.log("ALLOW_LIST:", allowList);
-      console.log("FORWARD?:", shouldForward);
-      console.log("BODY_RAW:", rawBody);
-      console.log("BODY_PARSED:", parsed);
+   if (DEBUG) {
+    console.log("=== ZADARMA WEBHOOK HIT ===");
+    console.log("CT:", contentTypeRaw);
+    console.log("EVENT_TYPE_RAW:", eventType);
+    console.log("ALLOW_LIST:", allowList);
+    console.log("FORWARD?:", shouldForward);
+    console.log("BODY_RAW:", rawBody);
+    console.log("BODY_PARSED:", parsed);
+
+    console.log("ALL POSSIBLE EVENT FIELDS:");
+    console.log("event:", get("event"));
+    console.log("event_type:", get("event_type"));
+    console.log("type:", get("type"));
+    console.log("notification:", get("notification"));
+    console.log("call_event:", get("call_event"));
+    console.log("pbx_event:", get("pbx_event"));
+    console.log("status:", get("status"));
+}
+
+    if (!shouldForward) {
+      // Drop noise but still return 200 so Zadarma won't retry
+      return { statusCode: 200, body: "IGNORED" };
     }
 
     if (!shouldForward) {
