@@ -17,7 +17,7 @@ Thumbs.db
 logs
 *.log
 
-# Netlify (local dev)
+# Netlify (lokalni dev)
 .netlify
 
 # Editor / IDE
