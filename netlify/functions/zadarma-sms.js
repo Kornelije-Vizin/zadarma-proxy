@@ -1,6 +1,6 @@
 export async function handler(event) {
   try {
-    // 1) Zadarma verification ping: ?zd_echo=XXXX
+    // 1) Zadarma verification ping
     const zdEcho = event.queryStringParameters?.zd_echo;
     if (zdEcho) {
       return {
@@ -10,18 +10,18 @@ export async function handler(event) {
       };
     }
 
-    // Only POST matters
     if (event.httpMethod !== "POST") {
       return { statusCode: 200, body: "OK" };
     }
 
-    const target = (process.env.LATENODE_SMS_WEBHOOK_URL || "").trim();
+    // NEW ENV VAR
+    const target = (process.env.LATENODE_INBOUND_SMS_WEBHOOK_URL || "").trim();
     if (!target) {
-      return { statusCode: 500, body: "Missing LATENODE_SMS_WEBHOOK_URL" };
+      return { statusCode: 500, body: "Missing LATENODE_INBOUND_SMS_WEBHOOK_URL" };
     }
 
     const DEBUG = (process.env.NODE_ENV || "").toLowerCase() !== "production";
-    
+
     const contentTypeRaw =
       event.headers?.["content-type"] ||
       event.headers?.["Content-Type"] ||
@@ -30,7 +30,7 @@ export async function handler(event) {
     const contentType = String(contentTypeRaw).toLowerCase();
     const rawBody = event.body || "";
 
-    // 2) Parse body
+    // Parse body
     let parsed = null;
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const usp = new URLSearchParams(rawBody);
@@ -43,7 +43,7 @@ export async function handler(event) {
       }
     }
 
-    // 3) Extract event type from multiple possible keys
+    // Extract event type
     const get = (k) => (parsed && typeof parsed === "object" ? parsed[k] : undefined);
 
     const eventType =
@@ -55,7 +55,7 @@ export async function handler(event) {
       get("status") ||
       "";
 
-    // 4) Allow-list filtering for SMS only
+    // Allow-list
     const allowEnv = (process.env.ALLOW_SMS_EVENTS || "").trim();
     const allowList = (
       allowEnv
@@ -65,12 +65,13 @@ export async function handler(event) {
 
     const normalizedEventType = String(eventType || "").toLowerCase();
 
-    // If type missing, forward only in debug; otherwise only allowed events
-    const shouldForward = !normalizedEventType ? DEBUG : allowList.includes(normalizedEventType);
+    const shouldForward = !normalizedEventType
+      ? DEBUG
+      : allowList.includes(normalizedEventType);
 
     if (DEBUG) {
-      console.log("=== ZADARMA SMS WEBHOOK HIT ===");
-      console.log("EVENT:", get("event"));
+      console.log("=== ZADARMA SMS WEBHOOK ===");
+      console.log("EVENT:", eventType);
       console.log("BODY_PARSED:", parsed);
     }
 
@@ -78,7 +79,7 @@ export async function handler(event) {
       return { statusCode: 200, body: "IGNORED" };
     }
 
-    // 5) Forward to Latenode
+    // Forward
     const forwardPayload = {
       source: "zadarma",
       webhookType: "sms",
@@ -86,7 +87,10 @@ export async function handler(event) {
       contentType: contentTypeRaw,
       eventType: eventType || null,
       headers: {
-        "user-agent": event.headers?.["user-agent"] || event.headers?.["User-Agent"] || null,
+        "user-agent":
+          event.headers?.["user-agent"] ||
+          event.headers?.["User-Agent"] ||
+          null,
         "x-forwarded-for": event.headers?.["x-forwarded-for"] || null,
       },
       rawBody,
@@ -94,12 +98,7 @@ export async function handler(event) {
       query: event.queryStringParameters || {},
     };
 
-    const doFetch = typeof fetch === "function" ? fetch : null;
-    if (!doFetch) {
-      return { statusCode: 500, body: "fetch() not available in this runtime. Set Node to 18/20." };
-    }
-
-    const resp = await doFetch(target, {
+    const resp = await fetch(target, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -111,7 +110,8 @@ export async function handler(event) {
     const latenodeBodyText = await resp.text().catch(() => "");
 
     if (DEBUG) {
-      const maskedTarget = target.length > 40 ? target.slice(0, 35) + "..." : target;
+      const maskedTarget =
+        target.length > 40 ? target.slice(0, 35) + "..." : target;
 
       return {
         statusCode: 200,

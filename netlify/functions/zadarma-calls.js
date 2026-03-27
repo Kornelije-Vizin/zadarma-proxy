@@ -15,13 +15,14 @@ export async function handler(event) {
       return { statusCode: 200, body: "OK" };
     }
 
-    const target = (process.env.LATENODE_WEBHOOK_URL || "").trim();
+    // NEW ENV VAR
+    const target = (process.env.LATENODE_INBOUND_CALL_WEBHOOK_URL || "").trim();
     if (!target) {
-      return { statusCode: 500, body: "Missing LATENODE_WEBHOOK_URL" };
+      return { statusCode: 500, body: "Missing LATENODE_INBOUND_CALL_WEBHOOK_URL" };
     }
 
     const DEBUG = (process.env.NODE_ENV || "").toLowerCase() !== "production";
-    
+
     const contentTypeRaw =
       event.headers?.["content-type"] ||
       event.headers?.["Content-Type"] ||
@@ -30,7 +31,7 @@ export async function handler(event) {
     const contentType = String(contentTypeRaw).toLowerCase();
     const rawBody = event.body || "";
 
-    // 2) Parse body (Zadarma often sends application/x-www-form-urlencoded)
+    // 2) Parse body
     let parsed = null;
     if (contentType.includes("application/x-www-form-urlencoded")) {
       const usp = new URLSearchParams(rawBody);
@@ -43,7 +44,7 @@ export async function handler(event) {
       }
     }
 
-    // 3) Extract event type from multiple possible keys
+    // 3) Extract event type
     const get = (k) => (parsed && typeof parsed === "object" ? parsed[k] : undefined);
 
     const eventType =
@@ -56,43 +57,41 @@ export async function handler(event) {
       get("status") ||
       "";
 
-    // 4) Allow-list filtering to reduce spam
-    const allowEnv = (process.env.ALLOW_EVENTS || "").trim();
+    // 4) Allow-list filtering
+    const allowEnv = (process.env.ALLOW_CALL_EVENTS || "").trim();
     const allowList = (allowEnv
       ? allowEnv.split(",").map((s) => s.trim()).filter(Boolean)
-      : ["notify_start", "notify_end", "notify_answer", "call_start", "call_end", "missed_call", "inbound_sms"]
+      : ["notify_start", "notify_end", "notify_answer"]
     ).map((s) => s.toLowerCase());
 
     const normalizedEventType = String(eventType || "").toLowerCase();
 
-   // If we can't detect type, we still forward during debug; otherwise drop unknowns.
-    const shouldForward = !normalizedEventType ? DEBUG : allowList.includes(normalizedEventType);
+    const shouldForward = !normalizedEventType
+      ? DEBUG
+      : allowList.includes(normalizedEventType);
 
-	  if (DEBUG) {
-  	  console.log("=== ZADARMA WEBHOOK HIT ===");
-  	  console.log("EVENT:", get("event"));
-  	  console.log("BODY_PARSED:", parsed);
-    }
-
-
-    if (!shouldForward) {
-      // Drop noise but still return 200 so Zadarma won't retry
-      return { statusCode: 200, body: "IGNORED" };
+    if (DEBUG) {
+      console.log("=== ZADARMA CALL WEBHOOK ===");
+      console.log("EVENT:", eventType);
+      console.log("BODY_PARSED:", parsed);
     }
 
     if (!shouldForward) {
-      // Drop noise but still return 200 so Zadarma won't retry
       return { statusCode: 200, body: "IGNORED" };
     }
 
-    // 5) Forward to Latenode (force JSON)
+    // 5) Forward to Latenode
     const forwardPayload = {
       source: "zadarma",
+      webhookType: "call",
       receivedAt: new Date().toISOString(),
       contentType: contentTypeRaw,
       eventType: eventType || null,
       headers: {
-        "user-agent": event.headers?.["user-agent"] || event.headers?.["User-Agent"] || null,
+        "user-agent":
+          event.headers?.["user-agent"] ||
+          event.headers?.["User-Agent"] ||
+          null,
         "x-forwarded-for": event.headers?.["x-forwarded-for"] || null,
       },
       rawBody,
@@ -100,17 +99,11 @@ export async function handler(event) {
       query: event.queryStringParameters || {},
     };
 
-    // Ensure fetch exists (Netlify Node 18/20 has it, but this is a safe fallback)
-    const doFetch = typeof fetch === "function" ? fetch : null;
-    if (!doFetch) {
-      return { statusCode: 500, body: "fetch() not available in this runtime. Set Node to 18/20." };
-    }
-
-    const resp = await doFetch(target, {
+    const resp = await fetch(target, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Proxy-Source": "netlify-zadarma-proxy",
+        "X-Proxy-Source": "netlify-zadarma-call-proxy",
       },
       body: JSON.stringify(forwardPayload),
     });
@@ -118,8 +111,8 @@ export async function handler(event) {
     const latenodeBodyText = await resp.text().catch(() => "");
 
     if (DEBUG) {
-      // Return diagnostics to the caller so you can see it in PowerShell immediately
-      const maskedTarget = target.length > 40 ? target.slice(0, 35) + "..." : target;
+      const maskedTarget =
+        target.length > 40 ? target.slice(0, 35) + "..." : target;
 
       return {
         statusCode: 200,
@@ -140,7 +133,6 @@ export async function handler(event) {
       };
     }
 
-    // Normal mode
     return { statusCode: 200, body: "OK" };
   } catch (e) {
     console.log("ERROR:", String(e));
